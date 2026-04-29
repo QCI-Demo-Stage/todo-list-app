@@ -1,0 +1,18 @@
+{
+  "name": "todo-app-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Todo API backend",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "knex": "^3.1.0",
+    "pg": "^8.13.1",
+    "sqlite3": "^5.1.7"
+  }
+}

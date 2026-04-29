@@ -11,3 +11,7 @@ dist/
 build/
 .idea/
 *.log
+
+# Local SQLite dev DB
+backend/data/
+*.sqlite3
