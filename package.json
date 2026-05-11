@@ -1,0 +1,15 @@
+{
+  "name": "todo-list-app",
+  "private": true,
+  "scripts": {
+    "start:e2e": "concurrently -k -s first -n api,web \"sh -c '[ -n \\\"$DATABASE_URL\\\" ] || export SQLITE_PATH=./e2e-dev.sqlite; exec npm start --prefix backend'\" \"wait-on http://127.0.0.1:3000/api/tasks && npm run dev --prefix frontend\"",
+    "cy:run": "cypress run",
+    "test:e2e": "start-server-and-test 'npm run start:e2e' http://127.0.0.1:5173 cy:run"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cypress": "^14.0.2",
+    "start-server-and-test": "^2.0.10",
+    "wait-on": "^8.0.1"
+  }
+}

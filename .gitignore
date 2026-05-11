@@ -12,3 +12,10 @@ dist/
 build/
 .idea/
 *.log
+
+# E2E local SQLite (when not using PostgreSQL)
+backend/e2e-dev.sqlite
+
+# Cypress artifacts
+cypress/screenshots/
+cypress/downloads/
