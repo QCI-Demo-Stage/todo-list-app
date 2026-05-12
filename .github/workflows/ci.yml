@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  NODE_VERSION: "20"
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/todo_test
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DB: todo_test
+  # Adjust if the app uses different ports (set in backend/frontend packages).
+  BACKEND_PORT: "3001"
+  FRONTEND_PORT: "5173"
+  CYPRESS_BASE_URL: http://127.0.0.1:5173
+
+jobs:
+  # Postgres for schema/migrations and DB readiness checks.
+  start-db:
+    name: start-db
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ${{ env.POSTGRES_DB }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run migrate --if-present
+
+  start-backend:
+    name: start-backend
+    needs: start-db
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ${{ env.POSTGRES_DB }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run migrate --if-present
+
+      - name: Build backend
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run build --if-present
+
+  start-frontend:
+    name: start-frontend
+    needs: start-backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:${{ env.BACKEND_PORT }}
+        run: npm run build
+
+  cypress-e2e:
+    name: Cypress E2E
+    needs: start-frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ${{ env.POSTGRES_DB }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache backend node_modules
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: backend-${{ runner.os }}-${{ hashFiles('backend/package-lock.json') }}
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: frontend-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Cypress via npm
+        working-directory: frontend
+        run: npm install cypress --save-dev
+
+      - name: Run database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run migrate --if-present
+
+      - name: Build frontend for preview server
+        working-directory: frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:${{ env.BACKEND_PORT }}
+        run: npm run build
+
+      # Keep API and UI in one step so background processes survive until Cypress finishes.
+      - name: Start backend and frontend, run Cypress (headless)
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          PORT: ${{ env.BACKEND_PORT }}
+          CYPRESS_BASE_URL: ${{ env.CYPRESS_BASE_URL }}
+          VITE_API_URL: http://127.0.0.1:${{ env.BACKEND_PORT }}
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/backend"
+          nohup env PORT="${PORT}" DATABASE_URL="${DATABASE_URL}" npm start \
+            > "${GITHUB_WORKSPACE}/backend-ci.log" 2>&1 &
+          cd "${GITHUB_WORKSPACE}"
+          npx --yes wait-on "tcp:127.0.0.1:${{ env.BACKEND_PORT }}" -t 120000
+          cd "${GITHUB_WORKSPACE}/frontend"
+          if node -e "const p=require('./package.json'); process.exit(p.scripts&&p.scripts.preview?0:1)"; then
+            nohup npm run preview -- --host 127.0.0.1 --port ${{ env.FRONTEND_PORT }} \
+              > "${GITHUB_WORKSPACE}/frontend-ci.log" 2>&1 &
+          else
+            nohup env VITE_API_URL="${VITE_API_URL}" npm run dev -- --host 127.0.0.1 --port ${{ env.FRONTEND_PORT }} \
+              > "${GITHUB_WORKSPACE}/frontend-ci.log" 2>&1 &
+          fi
+          cd "${GITHUB_WORKSPACE}"
+          npx --yes wait-on "tcp:127.0.0.1:${{ env.FRONTEND_PORT }}" -t 120000
+          cd "${GITHUB_WORKSPACE}/frontend"
+          npx cypress run --headless
